@@ -1,0 +1,2058 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="思鸿宾馆">
+    <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect fill='%233b82f6' rx='20' width='100' height='100'/><text y='80' x='50' text-anchor='middle' font-size='70' fill='white'>鸿</text></svg>">
+    <link rel="manifest" href="manifest.json">
+    <title>思鸿宾馆房态管理系统</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src='https://unpkg.com/tesseract.js@4.1.1/dist/tesseract.min.js'></script>
+    <style>
+        * { 
+            -webkit-tap-highlight-color: transparent;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, "Noto Sans SC", "PingFang SC", sans-serif;
+            background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
+            height: 100vh;
+            height: 100dvh;
+            overflow: hidden;
+            user-select: none;
+        }
+        
+        .glass {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+        }
+        
+        .status-empty { background: linear-gradient(135deg, #10b981 0%, #059669 100%); }
+        .status-occupied { background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); }
+        .status-cleaning { background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); }
+        .status-maintenance { background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%); }
+        
+        .touch-btn { 
+            min-height: 44px;
+            touch-action: manipulation;
+        }
+        
+        .room-card {
+            transition: all 0.2s ease;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .room-card:active { transform: scale(0.96); }
+        
+        /* 横竖屏适配 */
+        @media (orientation: portrait) {
+            .sidebar { width: 70px; }
+            .room-card { aspect-ratio: 1; }
+            #rooms-grid { grid-template-columns: repeat(3, 1fr); }
+            .modal-container { width: 100%; border-radius: 24px 24px 0 0; max-height: 85vh; }
+        }
+        
+        @media (orientation: landscape) {
+            .sidebar { width: 200px; }
+            .sidebar-top { flex-direction: column; width: 70px; border-right: 1px solid rgba(255,255,255,0.1); }
+            .sidebar-menu { flex-direction: row !important; flex: 1; justify-content: space-around; align-items: center; }
+            .nav-btn { flex-direction: column; padding: 12px 16px; }
+            .nav-btn span { display: block !important; font-size: 11px; margin-top: 4px; }
+            .room-card { aspect-ratio: 16/10; }
+            #rooms-grid { grid-template-columns: repeat(5, 1fr); }
+            .modal-container { width: 90%; max-width: 800px; border-radius: 20px; max-height: 90vh; }
+            .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+            .full-width { grid-column: 1 / -1; }
+        }
+        
+        @media (min-width: 1366px) and (orientation: landscape) {
+            #rooms-grid { grid-template-columns: repeat(6, 1fr); }
+        }
+        
+        @media (max-width: 375px) {
+            #rooms-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+        
+        .scan-line {
+            position: absolute;
+            width: 100%;
+            height: 3px;
+            background: #10b981;
+            box-shadow: 0 0 15px #10b981;
+            animation: scan 2.5s linear infinite;
+            z-index: 10;
+        }
+        
+        @keyframes scan {
+            0% { top: 0; opacity: 0; }
+            10% { opacity: 1; }
+            90% { opacity: 1; }
+            100% { top: 100%; opacity: 0; }
+        }
+        
+        .storage-indicator {
+            position: fixed;
+            bottom: max(20px, env(safe-area-inset-bottom));
+            right: 20px;
+            background: rgba(0,0,0,0.8);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 12px;
+            z-index: 100;
+            backdrop-filter: blur(10px);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        @media (orientation: landscape) {
+            .storage-indicator { bottom: auto; top: 20px; right: 20px; }
+        }
+        
+        .backup-reminder {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #f59e0b;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 25px;
+            font-size: 14px;
+            z-index: 99;
+            display: none;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 4px 15px rgba(245, 158, 11, 0.4);
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { transform: translateX(-50%) scale(1); }
+            50% { transform: translateX(-50%) scale(1.02); }
+        }
+        
+        .toast {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) scale(0.9);
+            background: rgba(0,0,0,0.85);
+            color: white;
+            padding: 16px 32px;
+            border-radius: 12px;
+            font-size: 16px;
+            z-index: 9999;
+            opacity: 0;
+            transition: all 0.3s;
+            pointer-events: none;
+            backdrop-filter: blur(10px);
+        }
+        
+        .toast.show {
+            opacity: 1;
+            transform: translate(-50%, -50%) scale(1);
+        }
+        
+        .floor-section {
+            margin-bottom: 16px;
+        }
+        
+        .floor-header {
+            background: linear-gradient(90deg, #3b82f6 0%, #1d4ed8 100%);
+            color: white;
+            padding: 12px 16px;
+            border-radius: 12px 12px 0 0;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .floor-rooms {
+            background: white;
+            border-radius: 0 0 12px 12px;
+            padding: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .edit-btn {
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+        
+        .room-card:hover .edit-btn {
+            opacity: 1;
+        }
+        
+        /* ========== iPad 优化 ========== */
+        
+        /* 增大触摸反馈 - 缩放效果 */
+        .touch-btn:active {
+            transform: scale(0.94);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        }
+        
+        /* 房间卡片增强反馈 */
+        .room-card:active {
+            transform: scale(0.94);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+        
+        /* 按钮点击波纹效果容器 */
+        .touch-ripple {
+            position: relative;
+            overflow: hidden;
+        }
+        
+        /* 输入框 iPad 优化 - 防止自动缩放 */
+        .input-ipad {
+            min-height: 52px;
+            font-size: 16px !important; /* 防止 iOS 自动缩放 */
+        }
+        
+        /* 横屏低高度优化 */
+        @media (orientation: landscape) and (max-height: 500px) {
+            .modal-container {
+                max-height: 95vh;
+            }
+            .modal-container .form-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 12px;
+            }
+            .modal-container .full-width {
+                grid-column: 1 / -1;
+            }
+            #mode-manual {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 12px;
+            }
+            #mode-manual input {
+                min-height: 48px;
+            }
+        }
+        
+        /* 选择器优化 */
+        select.input-ipad,
+        input.input-ipad {
+            -webkit-appearance: none;
+            appearance: none;
+        }
+        
+        /* 日期选择器优化 */
+        input[type="date"],
+        input[type="datetime-local"] {
+            font-size: 16px !important;
+            min-height: 48px;
+        }
+        
+        /* 模态框内容区优化 */
+        .modal-container .flex-1 {
+            -webkit-overflow-scrolling: touch;
+        }
+        
+        /* 按钮阴影增强 */
+        .touch-btn {
+            transition: all 0.15s ease;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .touch-btn:active {
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        }
+        
+        /* 主要操作按钮高亮 */
+        .touch-btn.bg-blue-600:active {
+            background-color: #2563eb;
+        }
+        
+        /* 房间状态卡片触摸反馈增强 */
+        .status-empty:active,
+        .status-occupied:active,
+        .status-cleaning:active,
+        .status-maintenance:active {
+            filter: brightness(0.9);
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 备份提醒 -->
+    <div class="backup-reminder" id="backup-reminder" onclick="showBackupDialog()">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+        </svg>
+        <span>已7天未备份，点击备份</span>
+    </div>
+
+    <!-- 存储状态 -->
+    <div class="storage-indicator" onclick="showStorageInfo()">
+        <span class="w-2 h-2 bg-green-400 rounded-full animate-pulse"></span>
+        <span>数据已保存</span>
+    </div>
+
+    <!-- 主界面 -->
+    <div class="flex h-full w-full">
+        <!-- 侧边栏 -->
+        <nav class="sidebar bg-slate-900 flex flex-col justify-between flex-shrink-0 z-20">
+            <div class="sidebar-top flex flex-col">
+                <div class="h-16 flex items-center justify-center border-b border-slate-700/50">
+                    <div class="w-10 h-10 bg-gradient-to-br from-yellow-400 to-orange-500 rounded-xl flex items-center justify-center shadow-lg">
+                        <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
+                        </svg>
+                    </div>
+                </div>
+                
+                <div class="sidebar-menu flex flex-col mt-2 px-2 space-y-1">
+                    <button onclick="switchTab('rooms')" class="nav-btn touch-btn flex flex-col items-center p-3 rounded-xl bg-white/10 text-white transition-all">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/>
+                        </svg>
+                        <span class="text-[10px] mt-1 hidden">房态</span>
+                    </button>
+                    
+                    <button onclick="switchTab('guests')" class="nav-btn touch-btn flex flex-col items-center p-3 rounded-xl text-slate-400 hover:bg-white/10 hover:text-white transition-all">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/>
+                        </svg>
+                        <span class="text-[10px] mt-1 hidden">客人</span>
+                    </button>
+                    
+                    <button onclick="switchTab('revenue')" class="nav-btn touch-btn flex flex-col items-center p-3 rounded-xl text-slate-400 hover:bg-white/10 hover:text-white transition-all">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                        <span class="text-[10px] mt-1 hidden">营收</span>
+                    </button>
+                    
+                    <button onclick="switchTab('manage')" class="nav-btn touch-btn flex flex-col items-center p-3 rounded-xl text-slate-400 hover:bg-white/10 hover:text-white transition-all">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                        </svg>
+                        <span class="text-[10px] mt-1 hidden">管理</span>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="p-2 pb-6">
+                <button onclick="showBackupDialog()" class="nav-btn touch-btn w-full flex flex-col items-center p-3 rounded-xl text-slate-400 hover:bg-white/10 hover:text-white transition-all">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                    </svg>
+                    <span class="text-[10px] mt-1 hidden">备份</span>
+                </button>
+            </div>
+        </nav>
+
+        <!-- 主内容区 -->
+        <main class="flex-1 flex flex-col overflow-hidden relative">
+            
+            <!-- 房态视图 -->
+            <div id="view-rooms" class="flex-1 overflow-y-auto p-4">
+                <div class="glass rounded-2xl p-4 mb-4 shadow-sm">
+                    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                        <div>
+                            <h1 class="text-xl font-bold text-gray-800">思鸿宾馆</h1>
+                            <p class="text-sm text-gray-500" id="current-date">--</p>
+                        </div>
+                        <div class="flex gap-2 flex-wrap" id="floor-filters">
+                            <!-- 动态生成楼层筛选 -->
+                        </div>
+                    </div>
+                    
+                    <!-- 统计卡片 -->
+                    <div class="grid grid-cols-4 gap-3 mt-4">
+                        <div class="bg-blue-50 rounded-xl p-3 text-center">
+                            <p class="text-2xl font-bold text-blue-600" id="stat-total">0</p>
+                            <p class="text-xs text-gray-600">总房</p>
+                        </div>
+                        <div class="bg-green-50 rounded-xl p-3 text-center">
+                            <p class="text-2xl font-bold text-green-600" id="stat-empty">0</p>
+                            <p class="text-xs text-gray-600">空房</p>
+                        </div>
+                        <div class="bg-red-50 rounded-xl p-3 text-center">
+                            <p class="text-2xl font-bold text-red-600" id="stat-occupied">0</p>
+                            <p class="text-xs text-gray-600">入住</p>
+                        </div>
+                        <div class="bg-gradient-to-br from-yellow-400 to-orange-500 rounded-xl p-3 text-center text-white shadow-md">
+                            <p class="text-2xl font-bold" id="stat-revenue">¥0</p>
+                            <p class="text-xs text-white/90">今日</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 按楼层分组的房间列表 -->
+                <div id="rooms-by-floor" class="space-y-4 pb-20"></div>
+            </div>
+
+            <!-- 客人视图 -->
+            <div id="view-guests" class="hidden flex-1 overflow-y-auto p-4">
+                <div class="glass rounded-2xl p-4">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-lg font-bold text-gray-800">在住客人</h2>
+                        <span class="text-sm text-gray-500" id="guest-count">0人</span>
+                    </div>
+                    <div id="guests-list" class="space-y-3"></div>
+                </div>
+            </div>
+
+            <!-- 营收视图 -->
+            <div id="view-revenue" class="hidden flex-1 overflow-y-auto p-4">
+                <div class="glass rounded-2xl p-4">
+                    <h2 class="text-lg font-bold text-gray-800 mb-4">营收统计</h2>
+                    
+                    <!-- 本月营收 -->
+                    <div class="bg-gradient-to-r from-yellow-400 to-orange-500 rounded-xl p-6 text-white mb-4 shadow-lg">
+                        <p class="text-sm opacity-90">本月累计营收</p>
+                        <p class="text-4xl font-bold" id="month-revenue">¥0</p>
+                    </div>
+                    
+                    <!-- 营收对比卡片 -->
+                    <div class="grid grid-cols-3 gap-3 mb-4">
+                        <div class="bg-green-50 rounded-xl p-3 text-center">
+                            <p class="text-xs text-gray-500">今日营收</p>
+                            <p class="text-lg font-bold text-green-600" id="today-revenue">¥0</p>
+                        </div>
+                        <div class="bg-blue-50 rounded-xl p-3 text-center">
+                            <p class="text-xs text-gray-500">本周营收</p>
+                            <p class="text-lg font-bold text-blue-600" id="week-revenue">¥0</p>
+                        </div>
+                        <div class="bg-purple-50 rounded-xl p-3 text-center">
+                            <p class="text-xs text-gray-500">本月营收</p>
+                            <p class="text-lg font-bold text-purple-600" id="month-revenue-small">¥0</p>
+                        </div>
+                    </div>
+                    
+                    <!-- 入住率统计 -->
+                    <div class="bg-white rounded-xl p-4 border border-gray-200 mb-4">
+                        <h3 class="font-bold text-gray-700 mb-3 flex items-center gap-2">
+                            <svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/>
+                            </svg>
+                            入住率统计
+                        </h3>
+                        <div class="space-y-3">
+                            <div class="flex justify-between items-center">
+                                <span class="text-sm text-gray-600">今日入住率</span>
+                                <div class="flex items-center gap-2">
+                                    <div class="w-32 h-2 bg-gray-200 rounded-full overflow-hidden">
+                                        <div id="today-occupancy-bar" class="h-full bg-blue-500 rounded-full" style="width: 0%"></div>
+                                    </div>
+                                    <span class="text-sm font-bold text-blue-600" id="today-occupancy">0%</span>
+                                </div>
+                            </div>
+                            <div class="flex justify-between items-center">
+                                <span class="text-sm text-gray-600">近 7 天平均</span>
+                                <span class="text-sm font-bold text-gray-700" id="avg-7days">0%</span>
+                            </div>
+                            <div class="flex justify-between items-center">
+                                <span class="text-sm text-gray-600">近 30 天平均</span>
+                                <span class="text-sm font-bold text-gray-700" id="avg-30days">0%</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 房型收入占比 -->
+                    <div class="bg-white rounded-xl p-4 border border-gray-200 mb-4">
+                        <h3 class="font-bold text-gray-700 mb-3 flex items-center gap-2">
+                            <svg class="w-5 h-5 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 3.055A3.005 3.005 0 0121 12h-2a1.005 1.005 0 00-2 0v1a5.005 5.005 0 01-10 0v-1a1.005 1.005 0 00-2 0H3a3.005 3.005 0 0110-8.945V3z"/>
+                            </svg>
+                            本月房型收入占比
+                        </h3>
+                        <div id="room-type-chart" class="space-y-2">
+                            <!-- 动态生成 -->
+                        </div>
+                    </div>
+                    
+                    <!-- 交易明细 -->
+                    <div class="flex justify-between items-center mb-2">
+                        <h3 class="font-bold text-gray-700">交易明细</h3>
+                        <button onclick="exportTransactions()" class="px-3 py-1.5 bg-blue-100 text-blue-600 rounded-lg text-xs font-medium touch-btn">导出明细</button>
+                    </div>
+                    <div id="revenue-list" class="space-y-2"></div>
+                </div>
+            </div>
+
+            <!-- 房间管理视图 -->
+            <div id="view-manage" class="hidden flex-1 overflow-y-auto p-4">
+                <div class="glass rounded-2xl p-4">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-lg font-bold text-gray-800">房间管理</h2>
+                        <div class="flex gap-2">
+                            <button onclick="showPricingConfig()" class="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium touch-btn">
+                                批量定价
+                            </button>
+                            <button onclick="showRoomConfig()" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium touch-btn">
+                                配置房间
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div id="manage-floor-list" class="space-y-4"></div>
+                    
+                    <div class="mt-6 bg-blue-50 rounded-xl p-4 border border-blue-200">
+                        <h3 class="font-medium text-blue-800 mb-2">当前配置</h3>
+                        <div id="current-config" class="text-sm text-gray-600 space-y-1"></div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- 入住模态框 -->
+    <div id="modal-checkin" class="fixed inset-0 z-50 hidden">
+        <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onclick="closeModal()"></div>
+        <div class="absolute inset-x-0 bottom-0 md:inset-0 md:flex md:items-center md:justify-center p-0 md:p-4 pointer-events-none">
+            <div class="modal-container glass w-full bg-white pointer-events-auto overflow-hidden flex flex-col">
+                <div class="p-4 border-b border-gray-200 flex justify-between items-center sticky top-0 bg-white/95 backdrop-blur z-10">
+                    <div>
+                        <h2 class="text-xl font-bold text-gray-800">办理入住</h2>
+                        <p class="text-sm text-blue-600 font-medium" id="checkin-room-info">--</p>
+                    </div>
+                    <button onclick="closeModal()" class="p-2 hover:bg-gray-100 rounded-full touch-btn">
+                        <svg class="w-6 h-6 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                        </svg>
+                    </button>
+                </div>
+                
+                <div class="flex-1 overflow-y-auto p-4">
+                    <form onsubmit="submitCheckIn(event)" class="form-grid space-y-4">
+                        <div class="full-width bg-gray-50 rounded-xl p-4">
+                            <div class="flex justify-between items-center mb-3">
+                                <h3 class="font-bold text-gray-700">主入住人信息</h3>
+                                <span class="text-xs text-gray-500">可添加同住人</span>
+                            </div>
+                            
+                            <div class="flex gap-2 mb-3">
+                                <button type="button" onclick="setInputMode('manual')" id="btn-manual" class="flex-1 py-2.5 rounded-lg bg-blue-600 text-white text-sm font-medium touch-btn">手动输入</button>
+                                <button type="button" onclick="setInputMode('camera')" id="btn-camera" class="flex-1 py-2.5 rounded-lg bg-white text-gray-600 text-sm font-medium touch-btn border border-gray-200">拍照识别</button>
+                            </div>
+                            
+                            <div id="mode-manual" class="space-y-3">
+                                <input type="text" name="name" placeholder="客人姓名 *" required class="w-full px-4 py-3 rounded-xl border border-gray-300 focus:ring-2 focus:ring-blue-500 outline-none text-base input-ipad" autocomplete="name">
+                                <input type="tel" name="phone" placeholder="手机号 *" required pattern="1[3-9]\d{9}" class="w-full px-4 py-3 rounded-xl border border-gray-300 focus:ring-2 focus:ring-blue-500 outline-none text-base input-ipad" autocomplete="tel">
+                                <input type="text" name="idCard" placeholder="身份证号（选填）" pattern="\d{17}[\dXx]" class="w-full px-4 py-3 rounded-xl border border-gray-300 focus:ring-2 focus:ring-blue-500 outline-none text-base input-ipad" autocomplete="off">
+                            </div>
+                            
+                            <!-- 同住人信息 -->
+                            <div class="mt-4 pt-4 border-t border-gray-200">
+                                <div class="flex justify-between items-center mb-2">
+                                    <h4 class="font-medium text-gray-600">同住人信息</h4>
+                                    <button type="button" onclick="addCoGuest()" class="px-3 py-1.5 bg-green-500 text-white rounded-lg text-xs font-medium touch-btn">+ 添加同住人</button>
+                                </div>
+                                <div id="co-guests-list" class="space-y-3">
+                                    <!-- 动态添加同住人 -->
+                                </div>
+                            </div>
+                            
+                            <div id="mode-camera" class="hidden space-y-3">
+                                <div class="relative bg-black rounded-xl overflow-hidden h-48 md:h-64 flex items-center justify-center" id="camera-container">
+                                    <video id="video" class="absolute inset-0 w-full h-full object-cover hidden" autoplay playsinline></video>
+                                    <canvas id="canvas" class="hidden"></canvas>
+                                    
+                                    <div id="camera-placeholder" class="text-center text-white p-4">
+                                        <div class="w-16 h-16 mx-auto mb-3 rounded-full bg-white/10 flex items-center justify-center">
+                                            <svg class="w-8 h-8 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/>
+                                            </svg>
+                                        </div>
+                                        <p class="text-sm opacity-80 mb-1">本地OCR识别</p>
+                                        <p class="text-xs opacity-50">数据不上传网络</p>
+                                    </div>
+                                    
+                                    <div id="scanning" class="hidden absolute inset-0">
+                                        <div class="scan-line"></div>
+                                        <div class="absolute inset-4 border-2 border-green-400/50 rounded-lg"></div>
+                                    </div>
+                                    
+                                    <button type="button" onclick="startCamera()" id="btn-start-camera" class="absolute bottom-4 left-1/2 -translate-x-1/2 px-6 py-2.5 bg-blue-600 text-white rounded-full text-sm font-medium touch-btn shadow-lg">
+                                        开启摄像头
+                                    </button>
+                                    
+                                    <button type="button" onclick="captureAndRecognize()" id="btn-capture" class="hidden absolute bottom-4 left-1/2 -translate-x-1/2 w-16 h-16 bg-white rounded-full border-4 border-blue-600 shadow-lg touch-btn">
+                                        <div class="w-12 h-12 bg-blue-600 rounded-full mx-auto"></div>
+                                    </button>
+                                    
+                                    <div id="processing" class="hidden absolute inset-0 bg-black/80 flex items-center justify-center">
+                                        <div class="text-center text-white">
+                                            <div class="w-10 h-10 border-4 border-white/30 border-t-white rounded-full animate-spin mx-auto mb-3"></div>
+                                            <p class="text-sm">识别中...</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div id="ocr-result" class="hidden bg-blue-50 rounded-lg p-3 border border-blue-200">
+                                    <div class="flex items-center gap-2 mb-2 text-blue-700">
+                                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                                        </svg>
+                                        <span class="font-medium text-sm">识别成功</span>
+                                    </div>
+                                    <div class="grid grid-cols-2 gap-2 text-sm">
+                                        <div><span class="text-gray-500">姓名：</span><span id="ocr-name" class="font-medium"></span></div>
+                                        <div><span class="text-gray-500">性别：</span><span id="ocr-gender" class="font-medium"></span></div>
+                                        <div class="col-span-2"><span class="text-gray-500">身份证：</span><span id="ocr-id" class="font-medium"></span></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="full-width bg-yellow-50 rounded-xl p-4 border border-yellow-200">
+                            <div class="flex justify-between items-center mb-3">
+                                <span class="text-sm font-medium text-gray-600">计费模式</span>
+                                <div class="flex gap-2">
+                                    <button type="button" onclick="toggleHourlyMode()" id="btn-hourly" class="px-3 py-1.5 bg-white border border-gray-300 rounded-lg text-xs font-medium touch-btn">切换钟点房</button>
+                                    <button type="button" onclick="toggleCustomPrice()" id="btn-custom-price" class="px-3 py-1.5 bg-white border border-gray-300 rounded-lg text-xs font-medium touch-btn">手动输入金额</button>
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-2 gap-3 mb-3">
+                                <div>
+                                    <label class="text-xs text-gray-600 block mb-1.5">入住日期</label>
+                                    <input type="date" id="checkin-date" name="checkIn" required class="w-full px-3 py-2.5 rounded-lg border border-gray-300 text-sm focus:ring-2 focus:ring-blue-500 outline-none" onchange="calculatePrice()">
+                                </div>
+                                <div>
+                                    <label class="text-xs text-gray-600 block mb-1.5">退房日期</label>
+                                    <input type="date" id="checkout-date" name="checkOut" required class="w-full px-3 py-2.5 rounded-lg border border-gray-300 text-sm focus:ring-2 focus:ring-blue-500 outline-none" onchange="calculatePrice()">
+                                </div>
+                            </div>
+                            
+                            <!-- 手动输入金额区域 -->
+                            <div id="custom-price-input" class="hidden mb-3">
+                                <label class="text-xs text-gray-600 block mb-1.5">实收房费（元）</label>
+                                <input type="number" id="custom-price-value" value="0" class="w-full px-3 py-2.5 rounded-lg border border-gray-300 text-sm focus:ring-2 focus:ring-blue-500 outline-none" onchange="calculatePrice()" oninput="calculatePrice()">
+                            </div>
+                            
+                            <div class="flex justify-between items-center pt-3 border-t border-yellow-200">
+                                <div class="text-sm text-gray-600 space-y-2">
+                                    <p><span class="font-medium text-gray-800" id="price-display">¥0</span> × <span id="days-display">0</span><span id="unit-text">晚</span></p>
+                                    <div class="flex items-center gap-2">
+                                        <span>押金</span>
+                                        <button type="button" onclick="toggleDepositFree()" id="btn-deposit-free" class="px-2 py-1 bg-white border border-gray-300 rounded text-xs font-medium touch-btn">免押金</button>
+                                        <input type="number" id="deposit-value" value="200" class="w-20 px-2 py-1 rounded-lg border border-gray-300 text-sm focus:ring-2 focus:ring-blue-500 outline-none" onchange="calculatePrice()" oninput="calculatePrice()">
+                                        <span>元</span>
+                                    </div>
+                                    <p class="text-xs text-gray-400" id="auto-price-hint"></p>
+                                </div>
+                                <div class="text-right">
+                                    <p class="text-xs text-gray-500 mb-0.5">应收合计</p>
+                                    <p class="text-3xl font-bold text-orange-600">¥<span id="total-display">0</span></p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <input type="hidden" name="roomId" id="input-room-id">
+                        <input type="hidden" name="totalAmount" id="input-total">
+                        
+                        <div class="full-width flex gap-3 pt-2">
+                            <button type="button" onclick="closeModal()" class="flex-1 py-3.5 border border-gray-300 rounded-xl text-gray-700 font-medium touch-btn hover:bg-gray-50">取消</button>
+                            <button type="submit" class="flex-1 py-3.5 bg-blue-600 text-white rounded-xl font-medium shadow-lg touch-btn hover:bg-blue-700">确认入住</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 房间配置模态框 -->
+    <div id="modal-config" class="fixed inset-0 z-50 hidden">
+        <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onclick="closeConfigModal()"></div>
+        <div class="absolute inset-0 flex items-center justify-center p-4 pointer-events-none">
+            <div class="glass w-full max-w-2xl rounded-2xl shadow-2xl pointer-events-auto max-h-[90vh] overflow-hidden flex flex-col">
+                <div class="p-4 border-b border-gray-200 flex justify-between items-center bg-white/95 backdrop-blur">
+                    <h2 class="text-xl font-bold text-gray-800">配置房间结构</h2>
+                    <button onclick="closeConfigModal()" class="p-2 hover:bg-gray-100 rounded-full">
+                        <svg class="w-6 h-6 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                        </svg>
+                    </button>
+                </div>
+                
+                <div class="flex-1 overflow-y-auto p-4">
+                    <div class="bg-yellow-50 rounded-xl p-4 border border-yellow-200 mb-4">
+                        <p class="text-sm text-yellow-800">
+                            <span class="font-bold">⚠️ 警告：</span>重新配置会清空所有房间数据和入住记录！请确保已备份数据。
+                        </p>
+                    </div>
+                    
+                    <div id="floor-config-list" class="space-y-3">
+                        <!-- 动态生成楼层配置 -->
+                    </div>
+                    
+                    <button onclick="addFloorConfig()" class="w-full mt-4 py-3 border-2 border-dashed border-gray-300 rounded-xl text-gray-500 font-medium hover:border-blue-400 hover:text-blue-600 transition-all touch-btn">
+                        + 添加楼层
+                    </button>
+                </div>
+                
+                <div class="p-4 border-t border-gray-200 bg-gray-50">
+                    <div class="flex gap-3">
+                        <button onclick="closeConfigModal()" class="flex-1 py-3 border border-gray-300 rounded-xl text-gray-700 font-medium touch-btn bg-white">取消</button>
+                        <button onclick="saveRoomConfig()" class="flex-1 py-3 bg-red-600 text-white rounded-xl font-medium shadow-lg touch-btn">保存配置（会清空数据）</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 编辑房间模态框 -->
+    <div id="modal-edit-room" class="fixed inset-0 z-50 hidden">
+        <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onclick="closeEditRoomModal()"></div>
+        <div class="absolute inset-0 flex items-center justify-center p-4 pointer-events-none">
+            <div class="glass w-full max-w-md rounded-2xl shadow-2xl pointer-events-auto p-6">
+                <h2 class="text-xl font-bold text-gray-800 mb-4">编辑房间</h2>
+                
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">房间号</label>
+                        <input type="text" id="edit-room-number" class="w-full px-4 py-3 rounded-xl border border-gray-300 bg-gray-100" readonly>
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">房型</label>
+                        <select id="edit-room-type" class="w-full px-4 py-3 rounded-xl border border-gray-300 focus:ring-2 focus:ring-blue-500 outline-none">
+                            <option value="标准大床房">标准大床房</option>
+                            <option value="标准双床房">标准双床房</option>
+                            <option value="豪华大床房">豪华大床房</option>
+                            <option value="商务套房">商务套房</option>
+                            <option value="家庭房">家庭房</option>
+                            <option value="钟点房">钟点房</option>
+                        </select>
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">房价（元/晚）</label>
+                        <input type="number" id="edit-room-price" class="w-full px-4 py-3 rounded-xl border border-gray-300 focus:ring-2 focus:ring-blue-500 outline-none">
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">状态</label>
+                        <select id="edit-room-status" class="w-full px-4 py-3 rounded-xl border border-gray-300 focus:ring-2 focus:ring-blue-500 outline-none">
+                            <option value="empty">空房</option>
+                            <option value="occupied">入住</option>
+                            <option value="cleaning">清洁中</option>
+                            <option value="maintenance">维修中</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="flex gap-3 mt-6">
+                    <button onclick="closeEditRoomModal()" class="flex-1 py-3 border border-gray-300 rounded-xl text-gray-700 font-medium touch-btn">取消</button>
+                    <button onclick="saveRoomEdit()" class="flex-1 py-3 bg-blue-600 text-white rounded-xl font-medium shadow-lg touch-btn">保存</button>
+                </div>
+                
+                <input type="hidden" id="edit-room-id">
+            </div>
+        </div>
+    </div>
+
+    <!-- 备份对话框 -->
+    <div id="modal-backup" class="fixed inset-0 z-50 hidden">
+        <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onclick="closeBackupModal()"></div>
+        <div class="absolute inset-0 flex items-center justify-center p-4 pointer-events-none">
+            <div class="glass w-full max-w-md rounded-2xl shadow-2xl pointer-events-auto p-6">
+                <h2 class="text-xl font-bold text-gray-800 mb-4">数据备份与恢复</h2>
+                
+                <div class="space-y-3">
+                    <div class="bg-blue-50 rounded-xl p-4 border border-blue-200">
+                        <h3 class="font-medium text-blue-800 mb-2">备份数据</h3>
+                        <p class="text-sm text-gray-600 mb-3">导出所有数据到文件</p>
+                        <button onclick="exportData()" class="w-full py-3 bg-blue-600 text-white rounded-xl font-medium touch-btn">立即备份</button>
+                    </div>
+                    
+                    <div class="bg-green-50 rounded-xl p-4 border border-green-200">
+                        <h3 class="font-medium text-green-800 mb-2">恢复数据</h3>
+                        <p class="text-sm text-gray-600 mb-3">从备份文件恢复</p>
+                        <button onclick="importData()" class="w-full py-3 bg-green-600 text-white rounded-xl font-medium touch-btn">选择文件</button>
+                    </div>
+                </div>
+                
+                <button onclick="closeBackupModal()" class="w-full mt-4 py-3 border border-gray-300 rounded-xl text-gray-700 font-medium touch-btn">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+        // ==================== 数据库 ====================
+        const DB_NAME = 'SihongHotelDB_v3';
+        const DB_VERSION = 1;
+        let db;
+        let tesseractWorker = null;
+        let currentRoom = null;
+        let videoStream = null;
+        let roomConfig = []; // 房间配置缓存
+
+        function initDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(DB_NAME, DB_VERSION);
+                
+                request.onerror = () => reject(request.error);
+                request.onsuccess = () => {
+                    db = request.result;
+                    resolve(db);
+                };
+                
+                request.onupgradeneeded = (event) => {
+                    const db = event.target.result;
+                    
+                    if (!db.objectStoreNames.contains('rooms')) {
+                        const roomStore = db.createObjectStore('rooms', { keyPath: 'id', autoIncrement: true });
+                        roomStore.createIndex('number', 'number', { unique: true });
+                        roomStore.createIndex('status', 'status');
+                        roomStore.createIndex('floor', 'floor');
+                    }
+                    
+                    if (!db.objectStoreNames.contains('guests')) {
+                        const guestStore = db.createObjectStore('guests', { keyPath: 'id', autoIncrement: true });
+                        guestStore.createIndex('roomNumber', 'roomNumber');
+                        guestStore.createIndex('status', 'status');
+                    }
+                    
+                    if (!db.objectStoreNames.contains('transactions')) {
+                        const transStore = db.createObjectStore('transactions', { keyPath: 'id', autoIncrement: true });
+                        transStore.createIndex('date', 'date');
+                    }
+                    
+                    if (!db.objectStoreNames.contains('settings')) {
+                        db.createObjectStore('settings', { keyPath: 'key' });
+                    }
+                };
+            });
+        }
+
+        function dbOperation(storeName, mode, callback) {
+            const transaction = db.transaction(storeName, mode);
+            const store = transaction.objectStore(storeName);
+            return callback(store);
+        }
+
+        async function getAll(storeName) {
+            return new Promise((resolve) => {
+                dbOperation(storeName, 'readonly', (store) => {
+                    const request = store.getAll();
+                    request.onsuccess = () => resolve(request.result);
+                });
+            });
+        }
+
+        async function add(storeName, data) {
+            return new Promise((resolve) => {
+                dbOperation(storeName, 'readwrite', (store) => {
+                    const request = store.add(data);
+                    request.onsuccess = () => resolve(request.result);
+                });
+            });
+        }
+
+        async function put(storeName, data) {
+            return new Promise((resolve) => {
+                dbOperation(storeName, 'readwrite', (store) => {
+                    const request = store.put(data);
+                    request.onsuccess = () => resolve(request.result);
+                });
+            });
+        }
+
+        async function getSetting(key) {
+            return new Promise((resolve) => {
+                dbOperation('settings', 'readonly', (store) => {
+                    const request = store.get(key);
+                    request.onsuccess = () => resolve(request.result?.value);
+                });
+            });
+        }
+
+        async function setSetting(key, value) {
+            await put('settings', { key, value, updatedAt: new Date().toISOString() });
+        }
+
+        // ==================== 初始化 ====================
+        async function init() {
+            await initDB();
+            
+            // 加载房间配置
+            const savedConfig = await getSetting('roomConfig');
+            if (savedConfig) {
+                roomConfig = savedConfig;
+            } else {
+                // 默认配置：1-3楼各6间，4楼3间
+                roomConfig = [
+                    { floor: 1, count: 6, prefix: '1' },
+                    { floor: 2, count: 6, prefix: '2' },
+                    { floor: 3, count: 6, prefix: '3' },
+                    { floor: 4, count: 3, prefix: '4' }
+                ];
+                await setSetting('roomConfig', roomConfig);
+            }
+            
+            // 检查是否需要初始化房间
+            const rooms = await getAll('rooms');
+            if (rooms.length === 0) {
+                await initRoomsFromConfig();
+            }
+            
+            try {
+                tesseractWorker = await Tesseract.createWorker('chi_sim');
+            } catch(e) {
+                console.log('Tesseract未加载');
+            }
+            
+            checkBackupReminder();
+            loadRooms();
+            updateDate();
+        }
+
+        async function initRoomsFromConfig() {
+            const types = [
+                { type: '标准大床房', price: 188 },
+                { type: '标准双床房', price: 228 },
+                { type: '豪华大床房', price: 328 }
+            ];
+            
+            for (const config of roomConfig) {
+                for (let i = 1; i <= config.count; i++) {
+                    const roomNum = config.prefix + String(i).padStart(2, '0');
+                    const typeCfg = types[(i - 1) % types.length];
+                    await add('rooms', {
+                        number: roomNum,
+                        floor: config.floor,
+                        type: typeCfg.type,
+                        status: 'empty',
+                        price: typeCfg.price,
+                        createdAt: new Date().toISOString()
+                    });
+                }
+            }
+            showToast(`已创建 ${roomConfig.reduce((a, b) => a + b.count, 0)} 个房间`);
+        }
+
+        // ==================== 房间管理 ====================
+        async function loadRooms() {
+            const rooms = await getAll('rooms');
+            const guests = await getAll('guests');
+            
+            const guestMap = {};
+            guests.filter(g => g.status === 'checked_in').forEach(g => {
+                guestMap[g.roomNumber] = g;
+            });
+            
+            rooms.forEach(r => r.guest = guestMap[r.number] || null);
+            
+            renderFloorFilters();
+            renderRoomsByFloor(rooms);
+            updateStats(rooms);
+            renderManageView(rooms);
+        }
+
+        function renderFloorFilters() {
+            const container = document.getElementById('floor-filters');
+            const floors = [...new Set(roomConfig.map(c => c.floor))].sort((a, b) => a - b);
+            
+            // 获取当前选中的筛选器
+            const currentFilter = document.querySelector('.filter-btn.bg-blue-600')?.dataset.filter || 'all';
+            
+            let html = `<button onclick="filterRooms('all')" class="filter-btn px-3 py-1.5 rounded-lg ${currentFilter === 'all' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600'} text-sm font-medium touch-btn" data-filter="all">全部</button>`;
+            
+            floors.forEach(floor => {
+                const isActive = currentFilter === floor.toString();
+                html += `<button onclick="filterRooms('${floor}')" class="filter-btn px-3 py-1.5 rounded-lg ${isActive ? 'bg-blue-600 text-white' : 'bg-white text-gray-600'} text-sm touch-btn" data-filter="${floor}">${floor}楼</button>`;
+            });
+            
+            container.innerHTML = html;
+        }
+
+        function renderRoomsByFloor(rooms) {
+            const container = document.getElementById('rooms-by-floor');
+            const filter = document.querySelector('.filter-btn.bg-blue-600')?.dataset.filter || 'all';
+            
+            // 按楼层分组
+            const floors = {};
+            rooms.forEach(room => {
+                if (filter !== 'all' && room.floor.toString() !== filter) return;
+                if (!floors[room.floor]) floors[room.floor] = [];
+                floors[room.floor].push(room);
+            });
+            
+            // 按楼层号排序
+            const sortedFloors = Object.keys(floors).sort((a, b) => b - a);
+            
+            container.innerHTML = sortedFloors.map(floor => `
+                <div class="floor-section">
+                    <div class="floor-header">
+                        <span>${floor}楼</span>
+                        <span class="text-sm opacity-80">${floors[floor].length}间</span>
+                    </div>
+                    <div class="floor-rooms">
+                        <div class="grid grid-cols-3 md:grid-cols-5 lg:grid-cols-6 gap-3">
+                            ${floors[floor].map(room => `
+                                <div onclick="onRoomClick(${room.id})" class="room-card ${getStatusClass(room.status)} rounded-xl p-3 text-white cursor-pointer shadow-md relative group">
+                                    <div class="flex justify-between items-start">
+                                        <span class="text-lg font-bold">${room.number}</span>
+                                        ${room.status === 'occupied' ? '<span class="w-2 h-2 bg-white rounded-full animate-pulse"></span>' : ''}
+                                    </div>
+                                    <p class="text-xs opacity-90 mt-1 truncate">${room.type}</p>
+                                    <p class="text-[10px] opacity-75">¥${room.price}</p>
+                                    ${room.guest ? `
+                                        <div class="mt-2 pt-2 border-t border-white/20">
+                                            <p class="text-xs font-medium truncate">${room.guest.name}</p>
+                                        </div>
+                                    ` : ''}
+                                    <button onclick="event.stopPropagation(); editRoom(${room.id})" class="edit-btn absolute top-1 right-1 w-6 h-6 bg-white/20 rounded-full flex items-center justify-center">
+                                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+                                    </button>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function getStatusClass(s) {
+            return { 
+                empty: 'status-empty', 
+                occupied: 'status-occupied', 
+                cleaning: 'status-cleaning',
+                maintenance: 'status-maintenance'
+            }[s] || 'status-empty';
+        }
+
+        function updateStats(rooms) {
+            const total = rooms.length;
+            const occupied = rooms.filter(r => r.status === 'occupied').length;
+            const empty = rooms.filter(r => r.status === 'empty').length;
+            
+            document.getElementById('stat-total').textContent = total;
+            document.getElementById('stat-empty').textContent = empty;
+            document.getElementById('stat-occupied').textContent = occupied;
+            
+            const today = new Date().toISOString().split('T')[0];
+            getAll('transactions').then(trans => {
+                const revenue = trans
+                    .filter(t => t.date === today && t.type === 'income')
+                    .reduce((sum, t) => sum + t.amount, 0);
+                document.getElementById('stat-revenue').textContent = '¥' + revenue.toLocaleString();
+            });
+        }
+
+        function filterRooms(floor) {
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                const isActive = btn.dataset.filter === floor;
+                btn.className = isActive 
+                    ? 'filter-btn px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium touch-btn'
+                    : 'filter-btn px-3 py-1.5 rounded-lg bg-white text-gray-600 text-sm touch-btn';
+            });
+            loadRooms();
+        }
+
+        // ==================== 房间配置 ====================
+        function renderManageView(rooms) {
+            const container = document.getElementById('manage-floor-list');
+            const configDiv = document.getElementById('current-config');
+            
+            // 按楼层统计
+            const floorStats = {};
+            rooms.forEach(r => {
+                if (!floorStats[r.floor]) {
+                    floorStats[r.floor] = { count: 0, occupied: 0, types: {} };
+                }
+                floorStats[r.floor].count++;
+                if (r.status === 'occupied') floorStats[r.floor].occupied++;
+                floorStats[r.floor].types[r.type] = (floorStats[r.floor].types[r.type] || 0) + 1;
+            });
+            
+            container.innerHTML = Object.entries(floorStats).map(([floor, stats]) => `
+                <div class="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+                    <div class="flex justify-between items-center mb-2">
+                        <h3 class="font-bold text-gray-800">${floor}楼</h3>
+                        <span class="text-sm text-gray-500">${stats.occupied}/${stats.count} 间入住</span>
+                    </div>
+                    <div class="text-sm text-gray-600">
+                        ${Object.entries(stats.types).map(([type, count]) => `${type}: ${count}间`).join('、')}
+                    </div>
+                </div>
+            `).join('');
+            
+            configDiv.innerHTML = roomConfig.map(c => 
+                `<p>${c.floor}楼: ${c.count}间房（编号${c.prefix}01-${c.prefix}${String(c.count).padStart(2, '0')}）</p>`
+            ).join('');
+        }
+
+        function showRoomConfig() {
+            const container = document.getElementById('floor-config-list');
+            container.innerHTML = roomConfig.map((config, index) => `
+                <div class="bg-white rounded-xl p-4 border border-gray-200 flex items-center gap-4">
+                    <div class="flex-1">
+                        <label class="block text-xs text-gray-500 mb-1">楼层</label>
+                        <input type="number" value="${config.floor}" class="floor-num w-20 px-3 py-2 rounded-lg border border-gray-300 text-center font-bold" data-index="${index}">
+                    </div>
+                    <div class="flex-1">
+                        <label class="block text-xs text-gray-500 mb-1">房间数</label>
+                        <input type="number" value="${config.count}" class="floor-count w-20 px-3 py-2 rounded-lg border border-gray-300 text-center" data-index="${index}">
+                    </div>
+                    <div class="flex-1">
+                        <label class="block text-xs text-gray-500 mb-1">编号前缀</label>
+                        <input type="text" value="${config.prefix}" class="floor-prefix w-20 px-3 py-2 rounded-lg border border-gray-300 text-center" data-index="${index}" maxlength="2">
+                    </div>
+                    <button onclick="removeFloorConfig(${index})" class="p-2 text-red-500 hover:bg-red-50 rounded-lg">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                    </button>
+                </div>
+            `).join('');
+            
+            document.getElementById('modal-config').classList.remove('hidden');
+        }
+
+        function addFloorConfig() {
+            const maxFloor = Math.max(...roomConfig.map(c => c.floor), 0);
+            roomConfig.push({
+                floor: maxFloor + 1,
+                count: 6,
+                prefix: String(maxFloor + 1)
+            });
+            showRoomConfig();
+        }
+
+        function removeFloorConfig(index) {
+            if (roomConfig.length <= 1) {
+                alert('至少保留一个楼层');
+                return;
+            }
+            roomConfig.splice(index, 1);
+            showRoomConfig();
+        }
+
+        async function saveRoomConfig() {
+            if (!confirm('确定要重新配置房间吗？这将清空所有房间数据、入住记录和交易记录！\n\n请确保已备份重要数据！')) {
+                return;
+            }
+            
+            // 读取配置
+            const inputs = document.querySelectorAll('#floor-config-list > div');
+            const newConfig = [];
+            inputs.forEach(div => {
+                newConfig.push({
+                    floor: parseInt(div.querySelector('.floor-num').value),
+                    count: parseInt(div.querySelector('.floor-count').value),
+                    prefix: div.querySelector('.floor-prefix').value
+                });
+            });
+            
+            // 验证
+            if (newConfig.some(c => !c.floor || !c.count || !c.prefix)) {
+                alert('请填写完整信息');
+                return;
+            }
+            
+            // 清空所有数据
+            const stores = ['rooms', 'guests', 'transactions'];
+            for (const storeName of stores) {
+                const all = await getAll(storeName);
+                for (const item of all) {
+                    await dbOperation(storeName, 'readwrite', s => s.delete(item.id));
+                }
+            }
+            
+            // 保存新配置
+            roomConfig = newConfig.sort((a, b) => a.floor - b.floor);
+            await setSetting('roomConfig', roomConfig);
+            
+            // 初始化新房间
+            await initRoomsFromConfig();
+            
+            closeConfigModal();
+            loadRooms();
+            showToast('房间配置已更新');
+        }
+
+        function closeConfigModal() {
+            document.getElementById('modal-config').classList.add('hidden');
+        }
+
+        // ==================== 编辑单个房间 ====================
+        async function editRoom(roomId) {
+            const rooms = await getAll('rooms');
+            const room = rooms.find(r => r.id === roomId);
+            if (!room) return;
+            
+            document.getElementById('edit-room-id').value = room.id;
+            document.getElementById('edit-room-number').value = room.number;
+            document.getElementById('edit-room-type').value = room.type;
+            document.getElementById('edit-room-price').value = room.price;
+            document.getElementById('edit-room-status').value = room.status;
+            
+            document.getElementById('modal-edit-room').classList.remove('hidden');
+        }
+
+        async function saveRoomEdit() {
+            const id = parseInt(document.getElementById('edit-room-id').value);
+            const rooms = await getAll('rooms');
+            const room = rooms.find(r => r.id === id);
+            
+            if (!room) return;
+            
+            room.type = document.getElementById('edit-room-type').value;
+            room.price = parseInt(document.getElementById('edit-room-price').value);
+            room.status = document.getElementById('edit-room-status').value;
+            room.updatedAt = new Date().toISOString();
+            
+            await put('rooms', room);
+            
+            closeEditRoomModal();
+            loadRooms();
+            showToast('房间信息已更新');
+        }
+
+        function closeEditRoomModal() {
+            document.getElementById('modal-edit-room').classList.add('hidden');
+        }
+
+        // ==================== 入住办理（与之前类似，省略部分代码） ====================
+        async function onRoomClick(roomId) {
+            const rooms = await getAll('rooms');
+            const room = rooms.find(r => r.id === roomId);
+            if (!room) return;
+            
+            if (room.status === 'empty') {
+                openCheckIn(room);
+            } else if (room.status === 'occupied' && room.guest) {
+                if (confirm(`${room.guest.name} - ${room.number}房\n入住：${room.guest.checkIn}\n退房：${room.guest.checkOut}\n费用：¥${room.guest.totalAmount}\n\n确定退房？`)) {
+                    await checkout(room, room.guest);
+                }
+            } else if (room.status === 'cleaning') {
+                if (confirm('房间清洁完成了吗？')) {
+                    room.status = 'empty';
+                    await put('rooms', room);
+                    loadRooms();
+                    showToast('房间已置为空房');
+                }
+            } else if (room.status === 'maintenance') {
+                if (confirm('房间维修完成了吗？')) {
+                    room.status = 'empty';
+                    await put('rooms', room);
+                    loadRooms();
+                    showToast('房间已置为空房');
+                }
+            }
+        }
+
+        function openCheckIn(room) {
+            currentRoom = room;
+            document.getElementById('checkin-room-info').textContent = `${room.number}房 · ${room.type} · ¥${room.price}/晚`;
+            document.getElementById('input-room-id').value = room.id;
+            document.getElementById('price-display').textContent = '¥' + room.price;
+            
+            const today = new Date();
+            const tomorrow = new Date(today);
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            
+            document.getElementById('checkin-date').value = today.toISOString().split('T')[0];
+            document.getElementById('checkout-date').value = tomorrow.toISOString().split('T')[0];
+            
+            calculatePrice();
+            setInputMode('manual');
+            document.getElementById('modal-checkin').classList.remove('hidden');
+        }
+
+        // ==================== 入住办理核心功能 ====================
+        
+        // 切换输入模式
+        function setInputMode(mode) {
+            const manualBtn = document.getElementById('btn-manual');
+            const cameraBtn = document.getElementById('btn-camera');
+            const manualDiv = document.getElementById('mode-manual');
+            const cameraDiv = document.getElementById('mode-camera');
+            
+            if (mode === 'manual') {
+                manualBtn.className = 'flex-1 py-2.5 rounded-lg bg-blue-600 text-white text-sm font-medium touch-btn';
+                cameraBtn.className = 'flex-1 py-2.5 rounded-lg bg-white text-gray-600 text-sm font-medium touch-btn border border-gray-200';
+                manualDiv.classList.remove('hidden');
+                cameraDiv.classList.add('hidden');
+                if (videoStream) {
+                    videoStream.getTracks().forEach(t => t.stop());
+                    videoStream = null;
+                }
+            } else {
+                cameraBtn.className = 'flex-1 py-2.5 rounded-lg bg-blue-600 text-white text-sm font-medium touch-btn';
+                manualBtn.className = 'flex-1 py-2.5 rounded-lg bg-white text-gray-600 text-sm font-medium touch-btn border border-gray-200';
+                cameraDiv.classList.remove('hidden');
+                manualDiv.classList.add('hidden');
+            }
+        }
+
+        // 启动摄像头
+        async function startCamera() {
+            try {
+                const video = document.getElementById('video');
+                const placeholder = document.getElementById('camera-placeholder');
+                const btnStart = document.getElementById('btn-start-camera');
+                const btnCapture = document.getElementById('btn-capture');
+                
+                videoStream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'environment' }
+                });
+                
+                video.srcObject = videoStream;
+                video.classList.remove('hidden');
+                placeholder.classList.add('hidden');
+                btnStart.classList.add('hidden');
+                btnCapture.classList.remove('hidden');
+            } catch (err) {
+                alert('无法访问摄像头：' + err.message);
+                console.error('摄像头错误:', err);
+            }
+        }
+
+        // 提交入住
+        async function submitCheckIn(event) {
+            event.preventDefault();
+            
+            const form = event.target;
+            const formData = new FormData(form);
+            
+            const name = formData.get('name');
+            const phone = formData.get('phone');
+            const idCard = formData.get('idCard') || '';
+            const checkIn = formData.get('checkIn');
+            const checkOut = formData.get('checkOut');
+            const totalAmount = parseInt(document.getElementById('input-total').value);
+            
+            if (!currentRoom || !name || !phone) {
+                alert('请填写完整信息');
+                return;
+            }
+            
+            // 获取同住人信息
+            const coGuests = getCoGuests();
+            
+            // 创建主客人记录
+            const guest = {
+                name: name,
+                phone: phone,
+                idCard: idCard,
+                roomNumber: currentRoom.number,
+                roomType: currentRoom.type,
+                checkIn: checkIn,
+                checkOut: checkOut,
+                totalAmount: totalAmount,
+                status: 'checked_in',
+                isHourly: isHourlyMode,
+                coGuests: coGuests,
+                createdAt: new Date().toISOString()
+            };
+            
+            const guestId = await add('guests', guest);
+            
+            // 更新房间状态
+            currentRoom.status = 'occupied';
+            currentRoom.guest = guest;
+            await put('rooms', currentRoom);
+            
+            // 记录交易
+            await add('transactions', {
+                guestName: name,
+                roomNumber: currentRoom.number,
+                amount: totalAmount,
+                type: 'income',
+                description: '入住 ' + currentRoom.type + (coGuests.length > 0 ? ` (+${coGuests.length}人)` : ''),
+                date: checkIn,
+                guestId: guestId,
+                createdAt: new Date().toISOString()
+            });
+            
+            showToast('入住办理成功！' + (coGuests.length > 0 ? `共${coGuests.length + 1}人入住` : ''));
+            closeModal();
+            loadRooms();
+        }
+
+        // 拍照并识别 - 修复表单访问
+        async function captureAndRecognize() {
+            try {
+                const video = document.getElementById('video');
+                const canvas = document.getElementById('canvas');
+                const processing = document.getElementById('processing');
+                const btnCapture = document.getElementById('btn-capture');
+                
+                // 检查视频是否就绪
+                if (!video.videoWidth || !video.videoHeight) {
+                    alert('摄像头尚未就绪，请稍后再试');
+                    return;
+                }
+                
+                // 捕获画面
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(video, 0, 0);
+                
+                // 显示处理中
+                processing.classList.remove('hidden');
+                btnCapture.classList.add('hidden');
+                
+                // OCR 识别
+                const result = await Tesseract.recognize(canvas, 'chi_sim', {
+                    logger: m => console.log('OCR 进度:', m)
+                });
+                
+                const text = result.data.text;
+                console.log('OCR 结果:', text);
+                
+                // 解析身份证信息（简化版，实际需要根据身份证格式优化）
+                const nameMatch = text.match(/姓名 [:\s]*([^\s女男]+)/);
+                const genderMatch = text.match(/(男 | 女)/);
+                const idMatch = text.match(/([1-9]\d{5}(18|19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\d{3}[\dXx])/);
+                
+                const name = nameMatch ? nameMatch[1].trim() : '';
+                const gender = genderMatch ? genderMatch[1] : '';
+                const idCard = idMatch ? idMatch[1] : '';
+                
+                // 显示结果
+                if (name || idCard) {
+                    document.getElementById('ocr-name').textContent = name || '未识别';
+                    document.getElementById('ocr-gender').textContent = gender || '未识别';
+                    document.getElementById('ocr-id').textContent = idCard || '未识别';
+                    document.getElementById('ocr-result').classList.remove('hidden');
+                    
+                    // 自动填充表单 - 修复直接访问 form 元素
+                    if (name) {
+                        const nameInput = document.querySelector('#mode-manual input[name="name"]');
+                        if (nameInput) nameInput.value = name;
+                    }
+                    if (idCard) {
+                        const idInput = document.querySelector('#mode-manual input[name="idCard"]');
+                        if (idInput) idInput.value = idCard;
+                    }
+                } else {
+                    alert('未能识别身份证信息，请尝试手动输入');
+                }
+                
+                processing.classList.add('hidden');
+                
+            } catch (err) {
+                console.error('OCR 识别错误:', err);
+                alert('识别失败：' + err.message);
+                document.getElementById('processing').classList.add('hidden');
+                document.getElementById('btn-capture').classList.remove('hidden');
+            }
+        }
+
+        // 退房 - 修复空引用检查
+        async function checkout(room, guest) {
+            if (!room || !guest) {
+                console.error('退房参数错误：room 或 guest 为空');
+                return;
+            }
+            try {
+                // 更新房间状态
+                room.status = 'cleaning';
+                room.guest = null;
+                await put('rooms', room);
+                
+                // 更新客人状态
+                guest.status = 'checked_out';
+                guest.checkOutActual = new Date().toISOString().split('T')[0];
+                await put('guests', guest);
+                
+                // 记录交易（退房）
+                await add('transactions', {
+                    guestName: guest.name,
+                    roomNumber: room.number,
+                    amount: 0,
+                    type: 'checkout',
+                    description: '退房',
+                    date: new Date().toISOString().split('T')[0],
+                    guestId: guest.id,
+                    createdAt: new Date().toISOString()
+                });
+                
+                showToast('退房成功，房间已设为清洁中');
+                loadRooms();
+                
+            } catch (err) {
+                console.error('退房错误:', err);
+                alert('退房失败：' + err.message);
+            }
+        }
+
+        // ==================== 其他功能 ====================
+        async function switchTab(tab) {
+            ['rooms', 'guests', 'revenue', 'manage'].forEach(t => {
+                document.getElementById('view-' + t).classList.toggle('hidden', t !== tab);
+            });
+            
+            document.querySelectorAll('.nav-btn').forEach((btn, idx) => {
+                const tabs = ['rooms', 'guests', 'revenue', 'manage', 'backup'];
+                const isActive = tabs[idx] === tab;
+                btn.className = isActive
+                    ? 'nav-btn touch-btn flex flex-col items-center p-3 rounded-xl bg-white/10 text-white transition-all'
+                    : 'nav-btn touch-btn flex flex-col items-center p-3 rounded-xl text-slate-400 hover:bg-white/10 hover:text-white transition-all';
+            });
+            
+            if (tab === 'guests') loadGuestsList();
+            if (tab === 'revenue') loadRevenue();
+            if (tab === 'manage') {
+                const rooms = await getAll('rooms');
+                renderManageView(rooms);
+            }
+        }
+
+        async function loadGuestsList() {
+            const guests = await getAll('guests');
+            const current = guests.filter(g => g.status === 'checked_in');
+            
+            document.getElementById('guest-count').textContent = current.length + '人';
+            document.getElementById('guests-list').innerHTML = current.map(g => `
+                <div class="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <h3 class="font-bold text-gray-800">${g.name}</h3>
+                            <p class="text-sm text-gray-500">${g.roomNumber}房 · ${g.roomType}</p>
+                            <p class="text-xs text-gray-400 mt-1">${g.checkIn} 至 ${g.checkOut}</p>
+                        </div>
+                        <div class="text-right">
+                            <p class="font-bold text-orange-600">¥${g.totalAmount}</p>
+                            <button onclick="quickCheckout('${g.roomNumber}')" class="mt-2 px-3 py-1.5 bg-red-100 text-red-600 rounded-lg text-xs font-medium touch-btn">退房</button>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        async function quickCheckout(roomNumber) {
+            const rooms = await getAll('rooms');
+            const room = rooms.find(r => r.number === roomNumber);
+            if (room && room.guest) await checkout(room, room.guest);
+        }
+
+        async function loadRevenue() {
+            const transactions = await getAll('transactions');
+            const rooms = await getAll('rooms');
+            const today = new Date().toISOString().split('T')[0];
+            const currentMonth = today.slice(0, 7);
+            
+            // 计算今日、本周、本月营收
+            const todayTrans = transactions.filter(t => t.date === today && t.type === 'income');
+            const todayRevenue = todayTrans.reduce((s, t) => s + t.amount, 0);
+            
+            // 本周（从周一开始）
+            const weekStart = getWeekStart(today);
+            const weekTrans = transactions.filter(t => t.date >= weekStart && t.date <= today && t.type === 'income');
+            const weekRevenue = weekTrans.reduce((s, t) => s + t.amount, 0);
+            
+            // 本月
+            const monthTrans = transactions.filter(t => t.date.startsWith(currentMonth) && t.type === 'income');
+            const monthRevenue = monthTrans.reduce((s, t) => s + t.amount, 0);
+            
+            // 更新营收显示
+            document.getElementById('month-revenue').textContent = '¥' + monthRevenue.toLocaleString();
+            document.getElementById('today-revenue').textContent = '¥' + todayRevenue.toLocaleString();
+            document.getElementById('week-revenue').textContent = '¥' + weekRevenue.toLocaleString();
+            document.getElementById('month-revenue-small').textContent = '¥' + monthRevenue.toLocaleString();
+            
+            // 计算入住率
+            const totalRooms = rooms.length;
+            const todayOccupied = rooms.filter(r => r.status === 'occupied').length;
+            const todayOccupancy = totalRooms > 0 ? Math.round((todayOccupied / totalRooms) * 100) : 0;
+            
+            document.getElementById('today-occupancy').textContent = todayOccupancy + '%';
+            document.getElementById('today-occupancy-bar').style.width = todayOccupancy + '%';
+            
+            // 计算近 7 天和 30 天平均入住率（简化版，基于交易记录估算）
+            const avg7Days = calculateAvgOccupancy(7, transactions, rooms);
+            const avg30Days = calculateAvgOccupancy(30, transactions, rooms);
+            
+            document.getElementById('avg-7days').textContent = avg7Days + '%';
+            document.getElementById('avg-30days').textContent = avg30Days + '%';
+            
+            // 房型收入占比
+            const typeRevenue = {};
+            monthTrans.forEach(t => {
+                const type = t.description.includes('标准双床房') ? '标准双床房' : 
+                            t.description.includes('豪华大床房') ? '豪华大床房' : '标准大床房';
+                typeRevenue[type] = (typeRevenue[type] || 0) + t.amount;
+            });
+            
+            const typeColors = { '标准大床房': 'bg-blue-500', '标准双床房': 'bg-green-500', '豪华大床房': 'bg-purple-500' };
+            
+            document.getElementById('room-type-chart').innerHTML = Object.entries(typeRevenue).map(([type, revenue]) => {
+                const percent = monthRevenue > 0 ? Math.round((revenue / monthRevenue) * 100) : 0; // 修复除以零错误
+                return `
+                    <div class="flex items-center gap-2">
+                        <span class="text-xs text-gray-600 w-20">${type}</span>
+                        <div class="flex-1 h-3 bg-gray-100 rounded-full overflow-hidden">
+                            <div class="h-full ${typeColors[type] || 'bg-blue-500'} rounded-full" style="width: ${percent}%"></div>
+                        </div>
+                        <span class="text-xs font-bold text-gray-700 w-12 text-right">${percent}%</span>
+                    </div>
+                `;
+            }).join('') || '<p class="text-sm text-gray-400 text-center py-4">暂无数据</p>';
+            
+            // 交易明细
+            const recent = transactions.slice(-20).reverse();
+            document.getElementById('revenue-list').innerHTML = recent.map(t => `
+                <div class="flex justify-between items-center p-3 bg-white rounded-lg shadow-sm">
+                    <div>
+                        <p class="text-sm font-medium text-gray-800">${t.guestName} · ${t.roomNumber}房</p>
+                        <p class="text-xs text-gray-500">${t.date} · ${t.description}</p>
+                    </div>
+                    <span class="font-bold ${t.type === 'income' ? 'text-green-600' : 'text-gray-400'}">
+                        ${t.type === 'income' ? '+' : ''}¥${Math.abs(t.amount)}
+                    </span>
+                </div>
+            `).join('');
+        }
+        
+        // 获取周一日期
+        function getWeekStart(dateStr) {
+            const date = new Date(dateStr);
+            const day = date.getDay();
+            const diff = day === 0 ? -6 : 1 - day;
+            date.setDate(date.getDate() + diff);
+            return date.toISOString().split('T')[0];
+        }
+        
+        // 计算平均入住率
+        function calculateAvgOccupancy(days, transactions, rooms) {
+            const totalRooms = rooms.length;
+            if (totalRooms === 0) return 0;
+            
+            const today = new Date();
+            let totalOccupancy = 0;
+            
+            for (let i = 0; i < days; i++) {
+                const date = new Date(today);
+                date.setDate(date.getDate() - i);
+                const dateStr = date.toISOString().split('T')[0];
+                
+                // 基于当天入住交易估算
+                const checkIns = transactions.filter(t => t.date === dateStr && t.type === 'income').length;
+                const occupancy = Math.min(100, Math.round((checkIns / totalRooms) * 100));
+                totalOccupancy += occupancy;
+            }
+            
+            return Math.round(totalOccupancy / days);
+        }
+        
+        // 导出交易明细
+        async function exportTransactions() {
+            const transactions = await getAll('transactions');
+            const csvContent = [
+                ['日期', '客人姓名', '房间号', '金额', '类型', '描述', '创建时间'].join(','),
+                ...transactions.map(t => [
+                    t.date,
+                    t.guestName,
+                    t.roomNumber,
+                    t.amount,
+                    t.type,
+                    t.description,
+                    t.createdAt
+                ].join(','))
+            ].join('\n');
+            
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `交易明细_${new Date().toISOString().split('T')[0]}.csv`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            showToast('交易明细已导出');
+        }
+
+        // ==================== 备份功能 ====================
+        async function checkBackupReminder() {
+            const lastBackup = await getSetting('lastBackup');
+            if (lastBackup) {
+                const daysSince = Math.floor((Date.now() - new Date(lastBackup)) / (1000 * 60 * 60 * 24));
+                if (daysSince >= 7) {
+                    document.getElementById('backup-reminder').style.display = 'flex';
+                }
+            }
+        }
+
+        async function exportData() {
+            const data = {
+                exportTime: new Date().toISOString(),
+                version: '3.0',
+                roomConfig: roomConfig,
+                rooms: await getAll('rooms'),
+                guests: await getAll('guests'),
+                transactions: await getAll('transactions')
+            };
+            
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `思鸿宾馆备份_${new Date().toISOString().split('T')[0]}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            await setSetting('lastBackup', new Date().toISOString());
+            document.getElementById('backup-reminder').style.display = 'none';
+            showToast('备份成功！');
+        }
+
+        async function importData() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.json';
+            input.onchange = async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                
+                try {
+                    const text = await file.text();
+                    const data = JSON.parse(text);
+                    
+                    if (!confirm(`恢复备份？\n备份时间: ${new Date(data.exportTime).toLocaleString()}\n将覆盖当前所有数据！`)) {
+                        return;
+                    }
+                    
+                    // 清空并恢复
+                    const stores = ['rooms', 'guests', 'transactions', 'settings'];
+                    for (const storeName of stores) {
+                        const all = await getAll(storeName);
+                        for (const item of all) {
+                            await dbOperation(storeName, 'readwrite', s => s.delete(item.id));
+                        }
+                    }
+                    
+                    // 恢复房间配置
+                    if (data.roomConfig) {
+                        roomConfig = data.roomConfig;
+                        await setSetting('roomConfig', roomConfig);
+                    }
+                    
+                    // 恢复数据
+                    for (const item of data.rooms || []) {
+                        delete item.id;
+                        await add('rooms', item);
+                    }
+                    for (const item of data.guests || []) {
+                        delete item.id;
+                        await add('guests', item);
+                    }
+                    for (const item of data.transactions || []) {
+                        delete item.id;
+                        await add('transactions', item);
+                    }
+                    
+                    showToast('数据恢复成功！');
+                    loadRooms();
+                    closeBackupModal();
+                    
+                } catch (err) {
+                    alert('恢复失败：' + err.message);
+                }
+            };
+            input.click();
+        }
+
+        // ==================== 工具函数 ====================
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 2000);
+        }
+
+        function updateDate() {
+            const d = new Date();
+            document.getElementById('current-date').textContent = 
+                `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 星期${'日一二三四五六'[d.getDay()]}`;
+        }
+
+        function closeModal() {
+            document.getElementById('modal-checkin').classList.add('hidden');
+            if (videoStream) {
+                videoStream.getTracks().forEach(t => t.stop());
+                videoStream = null;
+            }
+        }
+
+        function closeBackupModal() {
+            document.getElementById('modal-backup').classList.add('hidden');
+        }
+
+        function showBackupDialog() {
+            document.getElementById('modal-backup').classList.remove('hidden');
+        }
+
+        // 显示存储信息
+        function showStorageInfo() {
+            const estimate = navigator.storage && navigator.storage.estimate;
+            if (estimate) {
+                estimate.then(data => {
+                    const usage = (data.usage / 1024 / 1024).toFixed(2);
+                    const quota = (data.quota / 1024 / 1024).toFixed(2);
+                    const percent = ((data.usage / data.quota) * 100).toFixed(1);
+                    alert(`存储使用情况：\n\n已使用：${usage} MB\n总配额：${quota} MB\n使用率：${percent}%`);
+                }).catch(err => {
+                    alert('数据已保存到本地存储');
+                });
+            } else {
+                alert('数据已保存到 IndexedDB 本地数据库');
+            }
+        }
+
+        // ==================== 同住人功能 ====================
+        let coGuestCount = 0;
+        
+        function addCoGuest() {
+            coGuestCount++;
+            const container = document.getElementById('co-guests-list');
+            const div = document.createElement('div');
+            div.className = 'co-guest-item bg-white rounded-lg p-3 border border-gray-200';
+            div.dataset.index = coGuestCount;
+            div.innerHTML = `
+                <div class="flex justify-between items-center mb-2">
+                    <span class="text-sm font-medium text-gray-600">同住人 ${coGuestCount}</span>
+                    <button type="button" onclick="removeCoGuest(this)" class="text-red-500 hover:text-red-700">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                    </button>
+                </div>
+                <input type="text" name="coGuestName_${coGuestCount}" placeholder="姓名" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm mb-2">
+                <input type="tel" name="coGuestPhone_${coGuestCount}" placeholder="手机号" pattern="1[3-9]\\d{9}" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm mb-2">
+                <input type="text" name="coGuestId_${coGuestCount}" placeholder="身份证号（选填）" pattern="\\d{17}[\\dXx]" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm">
+            `;
+            container.appendChild(div);
+        }
+        
+        function removeCoGuest(btn) {
+            btn.closest('.co-guest-item').remove();
+        }
+        
+        function getCoGuests() {
+            const coGuests = [];
+            document.querySelectorAll('.co-guest-item').forEach(item => {
+                const index = item.dataset.index;
+                const nameInput = item.querySelector(`[name="coGuestName_${index}"]`);
+                const phoneInput = item.querySelector(`[name="coGuestPhone_${index}"]`);
+                const idInput = item.querySelector(`[name="coGuestId_${index}"]`);
+                const name = nameInput ? nameInput.value.trim() : '';
+                const phone = phoneInput ? phoneInput.value.trim() : '';
+                const idCard = idInput ? idInput.value.trim() : '';
+                if (name && phone) {
+                    coGuests.push({ name, phone, idCard });
+                }
+            });
+            return coGuests;
+        }
+
+        // ==================== 批量定价功能 ====================
+        function showPricingConfig() {
+            const container = document.getElementById('floor-config-list');
+            container.innerHTML = roomConfig.map((config, index) => `
+                <div class="bg-white rounded-xl p-4 border border-gray-200">
+                    <div class="flex justify-between items-center mb-3">
+                        <h3 class="font-bold text-gray-800">${config.floor}楼 批量定价</h3>
+                        <button onclick="removeFloorConfig(${index})" class="text-red-500 hover:bg-red-50 p-2 rounded-lg">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                        </button>
+                    </div>
+                    <div class="grid grid-cols-3 gap-2 mb-3">
+                        <div>
+                            <label class="block text-xs text-gray-500 mb-1">标准大床房</label>
+                            <input type="number" value="188" class="price-standard w-full px-2 py-2 rounded-lg border border-gray-300 text-center" data-floor="${config.floor}" data-type="标准大床房">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-gray-500 mb-1">标准双床房</label>
+                            <input type="number" value="228" class="price-double w-full px-2 py-2 rounded-lg border border-gray-300 text-center" data-floor="${config.floor}" data-type="标准双床房">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-gray-500 mb-1">豪华大床房</label>
+                            <input type="number" value="328" class="price-deluxe w-full px-2 py-2 rounded-lg border border-gray-300 text-center" data-floor="${config.floor}" data-type="豪华大床房">
+                        </div>
+                    </div>
+                    <button onclick="applyFloorPricing(${config.floor})" class="w-full py-2 bg-blue-600 text-white rounded-lg text-sm font-medium touch-btn">应用此楼层价格</button>
+                </div>
+            `).join('');
+            
+            document.getElementById('modal-config').classList.remove('hidden');
+        }
+        
+        async function applyFloorPricing(floor) {
+            const rooms = await getAll('rooms');
+            const floorRooms = rooms.filter(r => r.floor === floor);
+            
+            const prices = {};
+            document.querySelectorAll(`[data-floor="${floor}"]`).forEach(input => {
+                prices[input.dataset.type] = parseInt(input.value);
+            });
+            
+            const types = ['标准大床房', '标准双床房', '豪华大床房'];
+            let updated = 0;
+            
+            for (const room of floorRooms) {
+                const typeIndex = types.indexOf(room.type);
+                if (typeIndex >= 0 && prices[room.type]) {
+                    room.price = prices[room.type];
+                    await put('rooms', room);
+                    updated++;
+                }
+            }
+            
+            showToast(`已更新 ${floor}楼 ${updated} 个房间价格`);
+            loadRooms();
+        }
+
+        // ==================== 钟点房功能 ====================
+        let isHourlyMode = false;
+        let isCustomPriceMode = false; // 手动输入金额模式
+        
+        function toggleHourlyMode() {
+            isHourlyMode = !isHourlyMode;
+            const checkInLabel = document.querySelector('label[for="checkin-date"]');
+            const checkOutLabel = document.querySelector('label[for="checkout-date"]');
+            const btnHourly = document.getElementById('btn-hourly');
+            
+            if (isHourlyMode) {
+                document.getElementById('checkin-date').type = 'datetime-local';
+                document.getElementById('checkout-date').type = 'datetime-local';
+                checkInLabel.textContent = '入住时间';
+                checkOutLabel.textContent = '退房时间';
+                btnHourly.className = 'px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium touch-btn';
+            } else {
+                document.getElementById('checkin-date').type = 'date';
+                document.getElementById('checkout-date').type = 'date';
+                checkInLabel.textContent = '入住日期';
+                checkOutLabel.textContent = '退房日期';
+                btnHourly.className = 'px-3 py-1.5 bg-white border border-gray-300 rounded-lg text-xs font-medium touch-btn';
+            }
+            calculatePrice();
+        }
+        
+        // 切换手动输入金额模式
+        function toggleCustomPrice() {
+            isCustomPriceMode = !isCustomPriceMode;
+            const customPriceDiv = document.getElementById('custom-price-input');
+            const btnCustom = document.getElementById('btn-custom-price');
+            const autoHint = document.getElementById('auto-price-hint');
+            
+            if (isCustomPriceMode) {
+                customPriceDiv.classList.remove('hidden');
+                btnCustom.className = 'px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium touch-btn';
+                autoHint.textContent = '自动计算价格：¥' + (currentRoom ? currentRoom.price : 0) + '/晚';
+                // 初始化自定义价格为房间原价
+                document.getElementById('custom-price-value').value = currentRoom ? currentRoom.price : 0;
+            } else {
+                customPriceDiv.classList.add('hidden');
+                btnCustom.className = 'px-3 py-1.5 bg-white border border-gray-300 rounded-lg text-xs font-medium touch-btn';
+                autoHint.textContent = '';
+            }
+            calculatePrice();
+        }
+        
+        // 切换免押金模式
+        function toggleDepositFree() {
+            const depositInput = document.getElementById('deposit-value');
+            const btnDepositFree = document.getElementById('btn-deposit-free');
+            
+            if (depositInput.value == '0') {
+                depositInput.value = '200';
+                btnDepositFree.className = 'px-2 py-1 bg-white border border-gray-300 rounded text-xs font-medium touch-btn';
+            } else {
+                depositInput.value = '0';
+                btnDepositFree.className = 'px-2 py-1 bg-green-600 text-white rounded text-xs font-medium touch-btn';
+            }
+            calculatePrice();
+        }
+
+        // 重写计算价格函数支持钟点房和手动输入金额
+        function calculatePrice() {
+            const checkInValue = document.getElementById('checkin-date').value;
+            const checkOutValue = document.getElementById('checkout-date').value;
+            const priceDisplay = document.getElementById('price-display');
+            const daysDisplay = document.getElementById('days-display');
+            const totalDisplay = document.getElementById('total-display');
+            const unitText = document.getElementById('unit-text');
+            
+            if (!checkInValue || !checkOutValue) return;
+            
+            // 日期验证
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const checkIn = new Date(checkInValue);
+            const checkOut = new Date(checkOutValue);
+            
+            if (checkIn < today && !isHourlyMode) {
+                showToast('入住日期不能早于今天');
+                document.getElementById('checkin-date').value = today.toISOString().split('T')[0];
+                return;
+            }
+            
+            if (checkOut <= checkIn) {
+                showToast('退房日期必须晚于入住日期');
+                return;
+            }
+            
+            let hours = 1;
+            let pricePerUnit = currentRoom ? currentRoom.price : 0;
+            let unitTextLabel = '晚';
+            
+            if (isHourlyMode) {
+                hours = Math.max(1, Math.ceil((checkOut - checkIn) / (1000 * 60 * 60)));
+                pricePerUnit = Math.ceil((currentRoom ? currentRoom.price : 0) / 4); // 按 1/4 房价作为小时价
+                unitTextLabel = '小时';
+            } else {
+                hours = Math.max(1, Math.ceil((checkOut - checkIn) / (1000 * 60 * 60 * 24)));
+                unitTextLabel = '晚';
+            }
+            
+            // 如果是手动输入金额模式，使用用户输入的价格
+            let autoCalculatedTotal = pricePerUnit * hours;
+            let finalRoomPrice = autoCalculatedTotal;
+            
+            if (isCustomPriceMode) {
+                const customPrice = parseFloat(document.getElementById('custom-price-value').value) || 0;
+                finalRoomPrice = customPrice;
+                // 在手动模式下，显示用户输入的价格
+                priceDisplay.textContent = '¥' + customPrice + ' (实收)';
+                if (unitText) unitText.textContent = '';
+            } else {
+                priceDisplay.textContent = '¥' + pricePerUnit + '/' + unitTextLabel;
+                if (unitText) unitText.textContent = unitTextLabel;
+            }
+            
+            // 获取动态押金值
+            const deposit = parseInt(document.getElementById('deposit-value').value) || 0;
+            const total = finalRoomPrice + deposit;
+            
+            daysDisplay.textContent = hours;
+            totalDisplay.textContent = total.toLocaleString();
+            
+            // 更新隐藏字段
+            document.getElementById('input-total').value = total;
+        }
+
+        // 启动
+        window.addEventListener('DOMContentLoaded', init);
+        
+        let lastTouchEnd = 0;
+        document.addEventListener('touchend', (e) => {
+            const now = Date.now();
+            if (now - lastTouchEnd <= 300) e.preventDefault();
+            lastTouchEnd = now;
+        }, false);
+    </script>
+</body>
+</html>
